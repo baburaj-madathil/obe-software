@@ -28,4 +28,4 @@ It extracts Course Outcomes (COs) from syllabus PDFs, performs Knowledge Profile
 Install directly using `pip`:
 
 ```bash
-pip install git+[https://github.com/YOUR_USERNAME/obe-software.git](https://github.com/YOUR_USERNAME/obe-software.git)
+pip install git+[https://github.com/baburaj-madathil/obe-software.git](https://github.com/baburaj-madathil/obe-software.git)
