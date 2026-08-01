@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "obe-mapper"
+version = "0.1.0"
+description = "Outcome-Based Education (OBE) CO-WK & CO-PO Mapping service powered by Gemini AI"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+    { name = "Your Name", email = "your.email@example.com" }
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
+dependencies = [
+    "google-genai",
+    "pypdf",
+    "pandas",
+    "openpyxl",
+    "fastapi",
+    "uvicorn",
+    "python-multipart"
+]
+
+[project.scripts]
+obe-server = "obe.server:run_server"
+obe-mapper = "obe.mapper:main_cli"
+
+[tool.setuptools.packages.find]
+where = ["."]
