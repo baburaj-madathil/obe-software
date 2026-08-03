@@ -1,6 +1,3 @@
-# Update imports at the top of obe/server.py
-from .mapper import generate_co_wk_excel, generate_co_po_mapping
-
 import os
 import shutil
 import uuid
@@ -21,11 +18,11 @@ from obe.mapper import generate_co_wk_excel, generate_co_po_mapping
 MODEL_NAME = "gemini-2.5-flash"
 PORT = 8756
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parent.parent
 INPUT_DIR = BASE_DIR / "input"
 OUTPUT_DIR = BASE_DIR / "output"
 
-# Ensure input and output directories exist in the current folder
+# Ensure input and output directories exist in the project root
 INPUT_DIR.mkdir(exist_ok=True)
 OUTPUT_DIR.mkdir(exist_ok=True)
 
@@ -69,28 +66,35 @@ class OBEService:
 
     def process_syllabus(self, file_path: Path, api_key: str, unique_co_po_filename: str, job_temp_dir: Path):
         """
-        Executes CO-WK and CO-PO generation steps inside an isolated temp directory,
+        Executes CO-WK and CO-PO/PSO generation steps inside an isolated temp directory,
         using the user's provided API key.
         """
         original_cwd = os.getcwd()
         try:
             os.chdir(job_temp_dir)
 
+            # Copy PSOs.txt into job directory if present in BASE_DIR or current directory
+            root_pso_file = BASE_DIR / "PSOs.txt"
+            if root_pso_file.exists():
+                shutil.copy(root_pso_file, job_temp_dir / "PSOs.txt")
+
             # Step 1: Generate intermediate CO-WK Mapping
             generate_co_wk_excel(
                 pdf_path=str(file_path),
                 model_name=self.model_name,
-                api_key=api_key
+                api_key=api_key,
+                output_excel_path="CO_WK_Mapping.xlsx"
             )
 
-            # Step 2: Generate final CO-PO Mapping
+            # Step 2: Generate final CO-PO/PSO Mapping
             generate_co_po_mapping(
                 model_name=self.model_name,
                 api_key=api_key,
-                input_excel="CO_WK_Mapping.xlsx"
+                input_excel="CO_WK_Mapping.xlsx",
+                output_excel="CO_PO_Mapping.xlsx"
             )
 
-            # Locate generated file
+            # Locate generated report file
             generated_file = None
             for fname in ["CO_PO_Mapping.xlsx", "Gemini_Improved_CO_PO_Mapping.xlsx"]:
                 candidate = job_temp_dir / fname
@@ -177,7 +181,7 @@ async def main_page():
             <div id="result-container">
                 <h3 style="margin-top:0; color:#0c5460;">Processing Complete!</h3>
                 <p>Your mapping report has been generated:</p>
-                <a id="link-co-po" class="download-btn" href="#" download>Download CO-PO Mapping Excel</a>
+                <a id="link-co-po" class="download-btn" href="#" download>Download CO-PO/PSO Mapping Excel</a>
             </div>
 
             <div id="error-box" class="error-message"></div>
@@ -373,34 +377,10 @@ def listen_for_quit(server):
             break
 
 
-if __name__ == "__main__":
-    import uvicorn
-
-    host_ip = get_local_ip()
-
-    print("\n" + "=" * 65)
-    print("           OBE Mapping Server Started Successfully           ")
-    print("=" * 65)
-    print(f"  Access URL: http://{host_ip}:{PORT}")
-    print(f"  Input Folder:  {INPUT_DIR}")
-    print(f"  Output Folder: {OUTPUT_DIR}")
-    print("=" * 65)
-    print("  Press 'q' then ENTER in this window at any time to stop.")
-    print("=" * 65 + "\n")
-
-    config = uvicorn.Config(app=app, host=host_ip, port=PORT, log_level="info")
-    server = uvicorn.Server(config)
-
-    quit_thread = threading.Thread(target=listen_for_quit, args=(server,), daemon=True)
-    quit_thread.start()
-
-    server.run()
-
-
-# Add this entry function at the bottom of obe/server.py
 def run_server():
     """Entry point for the obe-server CLI command."""
     import uvicorn
+
     host_ip = get_local_ip()
 
     print("\n" + "=" * 65)
