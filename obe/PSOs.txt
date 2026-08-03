@@ -1,0 +1,3 @@
+PSO1: [WK3, WK4] Apply domain-specific engineering principles to analyze and design technical solutions.
+PSO2: [WK2, WK6] Utilize modern industry-standard software tools, frameworks, and experimental methods.
+PSO3: [WK5, WK7] Address contemporary societal, industrial, and environmental challenges.
