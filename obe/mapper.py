@@ -33,7 +33,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Reference data
+# Reference data (Washington Accord Knowledge Profiles WK1–WK9)
 # ---------------------------------------------------------------------------
 
 WK_FULL_DATA = [
@@ -93,6 +93,7 @@ WK_FULL_DATA = [
     },
 ]
 
+# JSON Schema for structured output (generate_co_wk_excel)
 ANALYSIS_SCHEMA = {
     "type": "ARRAY",
     "items": {
@@ -122,12 +123,16 @@ ANALYSIS_SCHEMA = {
     },
 }
 
+# ---------------------------------------------------------------------------
+# Configuration defaults
+# ---------------------------------------------------------------------------
+
 DEFAULT_MODEL = "gemini-2.5-flash"
 DEFAULT_INPUT_EXCEL = "CO_WK_Mapping.xlsx"
 DEFAULT_OUTPUT_EXCEL = "CO_PO_Mapping.xlsx"
 
 # ---------------------------------------------------------------------------
-# Base Program Outcomes (PO1 - PO11)
+# GAPC V4.0 Base Program Outcomes (PO1 - PO11)
 # ---------------------------------------------------------------------------
 
 BASE_PO_CATALOG: dict[str, dict] = {
@@ -289,14 +294,14 @@ BASE_PO_CATALOG: dict[str, dict] = {
 }
 
 # ---------------------------------------------------------------------------
-# Parsing PSOs and associated WKs from PSOs.txt
+# Load PSOs and associated WKs from PSOs.txt
 # ---------------------------------------------------------------------------
 
 def load_psos_from_file(pso_file_path: str = "PSOs.txt") -> dict[str, dict]:
     """
-    Reads PSOs.txt if present and constructs PSO entries with associated WKs and PIs.
+    Reads PSOs.txt if present in the execution directory and constructs PSO entries.
     
-    Supports optional WK specification in brackets:
+    Supports specifying custom WKs in brackets:
       PSO1: [WK3, WK4] Apply domain-specific engineering principles to analyze solutions.
       PSO2: [WK2, WK6] Utilize modern industry software tools for problem solving.
     """
@@ -336,7 +341,7 @@ def load_psos_from_file(pso_file_path: str = "PSOs.txt") -> dict[str, dict]:
                         },
                     }
     else:
-        # Fallback default PSOs
+        # Default PSOs fallback
         psos = {
             "PSO1": {
                 "title": "Program Specific Outcome 1 (Core Engineering & System Design)",
@@ -377,6 +382,10 @@ def get_full_catalog() -> dict[str, dict]:
 
 
 def gapc_mapping_value(yes_count: int, total_pis: int) -> tuple[int, float]:
+    """
+    GAPC V4.0 official strength calculation.
+    X = (Number of Yes) / (Number of PIs) × 100
+    """
     if total_pis <= 0 or yes_count <= 0:
         return 0, 0.0
     x = (yes_count / total_pis) * 100.0
@@ -408,7 +417,10 @@ left_align = Alignment(horizontal="left", vertical="center", wrap_text=True)
 def _style_header(ws, row: int, start_col: int, end_col: int) -> None:
     for col in range(start_col, end_col + 1):
         cell = ws.cell(row=row, column=col)
-        cell.font = header_font; cell.fill = header_fill; cell.alignment = center; cell.border = thin_border
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = center
+        cell.border = thin_border
 
 
 def _resolve_api_key(api_key: str) -> str:
@@ -444,7 +456,7 @@ def extract_syllabus_text(pdf_path: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Pipelines
+# Pipeline 1: PDF → CO + WK mapping
 # ---------------------------------------------------------------------------
 
 def generate_co_wk_excel(
@@ -454,12 +466,17 @@ def generate_co_wk_excel(
     output_excel_path: str = DEFAULT_INPUT_EXCEL,
 ) -> pd.DataFrame:
     if not model_name or not str(model_name).strip():
-        raise ValueError("model_name is required.")
+        raise ValueError("model_name is required (e.g. 'gemini-2.5-flash').")
+
     if genai is None:
         raise ImportError("Required dependency 'google-genai' is missing.")
 
     effective_api_key = _resolve_api_key(api_key)
+
+    print(f"[Step 1/5] Extracting content from PDF: {pdf_path}")
     syllabus_text = extract_syllabus_text(pdf_path)
+
+    print(f"[Step 2/5] Initializing Gemini client using model: {model_name}...")
     client = genai.Client(api_key=effective_api_key)
 
     prompt = (
@@ -471,6 +488,7 @@ def generate_co_wk_excel(
         f"SYLLABUS CONTENT:\n{syllabus_text}"
     )
 
+    print("[Step 3/5] Requesting CO extraction and WK mapping from Gemini...")
     response = client.models.generate_content(
         model=model_name,
         contents=prompt,
@@ -497,11 +515,17 @@ def generate_co_wk_excel(
         })
 
     df = pd.DataFrame(table_rows)
+
+    print(f"[Step 5/5] Exporting mapping results to Excel file: {output_excel_path}")
     with pd.ExcelWriter(output_excel_path, engine="openpyxl") as writer:
         df.to_excel(writer, sheet_name="CO_WK_Mapping", index=False)
 
     return df
 
+
+# ---------------------------------------------------------------------------
+# Pipeline 2: CO-PO / PSO mapping using Gemini
+# ---------------------------------------------------------------------------
 
 def init_gemini_client(api_key: str):
     if genai is None: raise ImportError("Required dependency 'google-genai' is missing.")
@@ -537,8 +561,8 @@ Your MANDATE is to produce an EXHAUSTIVE evaluation of ONE Course Outcome (CO)
 against EVERY SINGLE Outcome: {all_target_names}.
 
 MAPPING GUIDELINES (MAXIMIZE COVERAGE):
-1. SYSTEMATICALLY CHECK ALL OUTCOMES ({all_target_names}).
-2. Pay close attention to associated Knowledge Profiles (WKs) listed for each PO/PSO. If a CO matches a WK associated with a PSO, verify if that PSO's PIs are supported.
+1. SYSTEMATICALLY CHECK ALL OUTCOMES ({all_target_names}). Do NOT restrict checks only to primary outcomes.
+2. Pay close attention to associated Knowledge Profiles (WKs) listed for each PO/PSO. If a CO matches a WK associated with a PO or PSO, thoroughly evaluate if that outcome's PIs are supported.
 3. Mark a Performance Indicator (PI) as "Yes" whenever the CO statement explicitly OR implicitly supports that skill or action.
 
 Return ONLY a valid JSON object:
@@ -690,7 +714,32 @@ def create_excel_report(results: list[dict], model_name: str, output_path: str =
     ALL_POS = sorted(list(catalog.keys()), key=_po_sort_key)
     stats = _compute_strength_stats(results, ALL_POS)
 
-    ws1 = wb.active; ws1.title = "1_Strength_Matrix"
+    # Sheet 0: Embed source CO-WK data if present
+    if input_excel and os.path.exists(input_excel):
+        try:
+            src_df = pd.read_excel(input_excel)
+            ws0 = wb.active
+            ws0.title = "0_Source_CO_WK"
+            ws0["A1"] = f"Source CO-WK Mapping (from {os.path.basename(input_excel)})"
+            ws0["A1"].font = Font(bold=True, size=13, color="1F4E79")
+            ws0.merge_cells(start_row=1, start_column=1, end_row=1, end_column=max(len(src_df.columns), 1))
+
+            for col_idx, col_name in enumerate(src_df.columns, 1):
+                cell = ws0.cell(row=3, column=col_idx, value=str(col_name))
+                cell.font = header_font; cell.fill = header_fill; cell.alignment = center; cell.border = thin_border
+
+            for r_idx, row in enumerate(src_df.itertuples(index=False), 4):
+                for c_idx, value in enumerate(row, 1):
+                    cell = ws0.cell(row=r_idx, column=c_idx, value=value if pd.notna(value) else "")
+                    cell.border = thin_border; cell.alignment = left_align if c_idx > 1 else center
+
+            ws1 = wb.create_sheet("1_Strength_Matrix")
+        except Exception:
+            ws1 = wb.active; ws1.title = "1_Strength_Matrix"
+    else:
+        ws1 = wb.active; ws1.title = "1_Strength_Matrix"
+
+    # Sheet 1: Strength Matrix
     ws1["A1"] = "CO-PO/PSO Correlation Strength Matrix (GAPC V4.0)"
     ws1.cell(row=4, column=1, value="CO")
     for j, po in enumerate(ALL_POS, 2): ws1.cell(row=4, column=j, value=po)
@@ -711,6 +760,72 @@ def create_excel_report(results: list[dict], model_name: str, output_path: str =
             else: cell.value = "–"; cell.fill = no_fill
             cell.alignment = center; cell.border = thin_border; cell.font = Font(bold=True)
 
+    # Sheet 2: Calculation
+    ws_calc = wb.create_sheet("2_Strength_Calculation")
+    ws_calc["A1"] = "CO-PO/PSO Mapping Strength Calculation (GAPC V4.0)"
+
+    co_headers = ["CO", "Outcomes Mapped", "Count (3)", "Count (2)", "Count (1)", "Sum of Strengths", "Average Strength", "Status"]
+    for col, h in enumerate(co_headers, 1): ws_calc.cell(row=5, column=col, value=h)
+    _style_header(ws_calc, 5, 1, 8)
+
+    for i, cs in enumerate(stats["co_stats"]):
+        r = 6 + i
+        ws_calc.cell(row=r, column=1, value=cs["co_id"]).alignment = center
+        ws_calc.cell(row=r, column=2, value=cs["mapped_count"]).alignment = center
+        ws_calc.cell(row=r, column=3, value=cs["count_3"]).alignment = center
+        ws_calc.cell(row=r, column=4, value=cs["count_2"]).alignment = center
+        ws_calc.cell(row=r, column=5, value=cs["count_1"]).alignment = center
+        ws_calc.cell(row=r, column=6, value=cs["sum_strength"]).alignment = center
+        avg_cell = ws_calc.cell(row=r, column=7, value=cs["avg_strength"] if cs["avg_strength"] is not None else "–")
+        avg_cell.alignment = center
+        status_cell = ws_calc.cell(row=r, column=8, value="OK" if not cs.get("error") else "ERROR")
+        status_cell.alignment = center
+        for c in range(1, 9): ws_calc.cell(row=r, column=c).border = thin_border
+
+    po_start = 6 + len(stats["co_stats"]) + 2
+    po_headers = ["PO / PSO", "COs Mapped", "Count (3)", "Count (2)", "Count (1)", "Sum of Strengths", "Average Strength", "Coverage"]
+    header_row = po_start + 1
+    for col, h in enumerate(po_headers, 1): ws_calc.cell(row=header_row, column=col, value=h)
+    _style_header(ws_calc, header_row, 1, 8)
+
+    for i, po in enumerate(ALL_POS):
+        r = header_row + 1 + i
+        st = stats["po_stats"][po]
+        ws_calc.cell(row=r, column=1, value=po).alignment = center
+        ws_calc.cell(row=r, column=2, value=st["total_mapped"]).alignment = center
+        ws_calc.cell(row=r, column=3, value=st["count_3"]).alignment = center
+        ws_calc.cell(row=r, column=4, value=st["count_2"]).alignment = center
+        ws_calc.cell(row=r, column=5, value=st["count_1"]).alignment = center
+        ws_calc.cell(row=r, column=6, value=st["sum_strength"]).alignment = center
+        avg_cell = ws_calc.cell(row=r, column=7, value=st["avg_strength"] if st["avg_strength"] is not None else "–")
+        avg_cell.alignment = center
+        cov_cell = ws_calc.cell(row=r, column=8, value="Yes" if st["total_mapped"] > 0 else "No")
+        cov_cell.alignment = center
+        for c in range(1, 9): ws_calc.cell(row=r, column=c).border = thin_border
+
+    # Sheet 3: Justifications
+    ws2 = wb.create_sheet("3_Mapping_with_Justification")
+    headers2 = ["CO", "PO / PSO", "Strength", "X (%)", "Yes/Total PIs", "Contributing PIs", "Justification", "Primary WK"]
+    for col, h in enumerate(headers2, 1): ws2.cell(row=3, column=col, value=h)
+    _style_header(ws2, 3, 1, 8)
+
+    row_num = 4
+    for res in results:
+        co = res.get("co_id", "")
+        primary_wk = res.get("primary_wk", "")
+        mapped = res.get("mapped_pos") or {}
+        for po, data in sorted(mapped.items(), key=lambda x: _po_sort_key(x[0])):
+            ws2.cell(row=row_num, column=1, value=co).alignment = center
+            ws2.cell(row=row_num, column=2, value=po).alignment = center
+            ws2.cell(row=row_num, column=3, value=data.get("strength")).alignment = center
+            ws2.cell(row=row_num, column=4, value=data.get("mapping_strength_pct")).alignment = center
+            ws2.cell(row=row_num, column=5, value=f"{data.get('yes_count')}/{data.get('total_pis')}").alignment = center
+            ws2.cell(row=row_num, column=6, value=", ".join(data.get("contributing_pis") or [])).alignment = center
+            ws2.cell(row=row_num, column=7, value=data.get("justification", "")).alignment = left_align
+            ws2.cell(row=row_num, column=8, value=primary_wk).alignment = center
+            for c in range(1, 9): ws2.cell(row=row_num, column=c).border = thin_border
+            row_num += 1
+
     wb.save(output_path)
     print(f"\nExcel report saved → {output_path}")
 
@@ -719,6 +834,11 @@ def generate_co_po_mapping(model_name: str, api_key: str, input_excel: str = DEF
     catalog = get_full_catalog()
     client = init_gemini_client(api_key)
     results = analyze_all_cos(input_excel, client, model_name=model_name, sheet_name=sheet_name, catalog=catalog)
+    
+    json_path = "gemini_raw_analysis.json"
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(results, f, indent=2, ensure_ascii=False)
+
     create_excel_report(results, model_name=model_name, output_path=output_excel, input_excel=input_excel, catalog=catalog)
     return results
 
