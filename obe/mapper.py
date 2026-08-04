@@ -93,7 +93,6 @@ WK_FULL_DATA = [
     },
 ]
 
-# JSON Schema for structured output (generate_co_wk_excel)
 ANALYSIS_SCHEMA = {
     "type": "ARRAY",
     "items": {
@@ -106,26 +105,12 @@ ANALYSIS_SCHEMA = {
             "Primary_WK": {"type": "STRING"},
             "Detailed_Justification": {
                 "type": "STRING",
-                "description": (
-                    "Comprehensive explanation of why these WKs were mapped "
-                    "based on the CO text and WK Key Aspects."
-                ),
+                "description": "Comprehensive explanation of why these WKs were mapped based on the CO text and WK Key Aspects.",
             },
         },
-        "required": [
-            "CO_Number",
-            "Course_Outcome",
-            "Blooms_Level",
-            "Mapped_WKs",
-            "Primary_WK",
-            "Detailed_Justification",
-        ],
+        "required": ["CO_Number", "Course_Outcome", "Blooms_Level", "Mapped_WKs", "Primary_WK", "Detailed_Justification"],
     },
 }
-
-# ---------------------------------------------------------------------------
-# Configuration defaults
-# ---------------------------------------------------------------------------
 
 DEFAULT_MODEL = "gemini-2.5-flash"
 DEFAULT_INPUT_EXCEL = "CO_WK_Mapping.xlsx"
@@ -298,13 +283,6 @@ BASE_PO_CATALOG: dict[str, dict] = {
 # ---------------------------------------------------------------------------
 
 def load_psos_from_file(pso_file_path: str = "PSOs.txt") -> dict[str, dict]:
-    """
-    Reads PSOs.txt if present in the execution directory and constructs PSO entries.
-    
-    Supports specifying custom WKs in brackets:
-      PSO1: [WK3, WK4] Apply domain-specific engineering principles to analyze solutions.
-      PSO2: [WK2, WK6] Utilize modern industry software tools for problem solving.
-    """
     psos = {}
     path = Path(pso_file_path)
     
@@ -320,8 +298,7 @@ def load_psos_from_file(pso_file_path: str = "PSOs.txt") -> dict[str, dict]:
                     pso_id = pso_id.strip().upper()
                     text = text.strip()
                     
-                    # Extract associated WKs if specified in brackets, e.g. [WK3, WK4]
-                    wks = ["WK3", "WK4", "WK6"]  # Default fallback
+                    wks = ["WK3", "WK4", "WK6"]
                     wk_match = re.search(r"\[(.*?)\]", text)
                     if wk_match:
                         raw_wks = wk_match.group(1)
@@ -341,7 +318,6 @@ def load_psos_from_file(pso_file_path: str = "PSOs.txt") -> dict[str, dict]:
                         },
                     }
     else:
-        # Default PSOs fallback
         psos = {
             "PSO1": {
                 "title": "Program Specific Outcome 1 (Core Engineering & System Design)",
@@ -382,10 +358,6 @@ def get_full_catalog() -> dict[str, dict]:
 
 
 def gapc_mapping_value(yes_count: int, total_pis: int) -> tuple[int, float]:
-    """
-    GAPC V4.0 official strength calculation.
-    X = (Number of Yes) / (Number of PIs) × 100
-    """
     if total_pis <= 0 or yes_count <= 0:
         return 0, 0.0
     x = (yes_count / total_pis) * 100.0
@@ -431,11 +403,11 @@ def _resolve_api_key(api_key: str) -> str:
 
 def _strip_markdown_fences(text: str) -> str:
     text = text.strip()
-    match = re.match(r"^```(?:json)?\s*\n?(.*?)\n?```\s*$", text, re.DOTALL | re.IGNORECASE)
-    if match: return match.group(1).strip()
-    if text.startswith("```"): text = re.sub(r"^```(?:json)?\s*", "", text, count=1, flags=re.IGNORECASE)
-    if text.endswith("```"): text = text[: -3]
-    return text.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?", "", text, flags=re.IGNORECASE).strip()
+    if text.endswith("```"):
+        text = text[:-3].strip()
+    return text
 
 
 def _po_sort_key(po_name: str) -> tuple[int, int]:
@@ -466,17 +438,12 @@ def generate_co_wk_excel(
     output_excel_path: str = DEFAULT_INPUT_EXCEL,
 ) -> pd.DataFrame:
     if not model_name or not str(model_name).strip():
-        raise ValueError("model_name is required (e.g. 'gemini-2.5-flash').")
-
+        raise ValueError("model_name is required.")
     if genai is None:
         raise ImportError("Required dependency 'google-genai' is missing.")
 
     effective_api_key = _resolve_api_key(api_key)
-
-    print(f"[Step 1/5] Extracting content from PDF: {pdf_path}")
     syllabus_text = extract_syllabus_text(pdf_path)
-
-    print(f"[Step 2/5] Initializing Gemini client using model: {model_name}...")
     client = genai.Client(api_key=effective_api_key)
 
     prompt = (
@@ -488,7 +455,6 @@ def generate_co_wk_excel(
         f"SYLLABUS CONTENT:\n{syllabus_text}"
     )
 
-    print("[Step 3/5] Requesting CO extraction and WK mapping from Gemini...")
     response = client.models.generate_content(
         model=model_name,
         contents=prompt,
@@ -515,8 +481,6 @@ def generate_co_wk_excel(
         })
 
     df = pd.DataFrame(table_rows)
-
-    print(f"[Step 5/5] Exporting mapping results to Excel file: {output_excel_path}")
     with pd.ExcelWriter(output_excel_path, engine="openpyxl") as writer:
         df.to_excel(writer, sheet_name="CO_WK_Mapping", index=False)
 
@@ -714,7 +678,7 @@ def create_excel_report(results: list[dict], model_name: str, output_path: str =
     ALL_POS = sorted(list(catalog.keys()), key=_po_sort_key)
     stats = _compute_strength_stats(results, ALL_POS)
 
-    # Sheet 0: Embed source CO-WK data if present
+    # ----- Sheet 0: Source CO-WK Data -----
     if input_excel and os.path.exists(input_excel):
         try:
             src_df = pd.read_excel(input_excel)
@@ -732,6 +696,14 @@ def create_excel_report(results: list[dict], model_name: str, output_path: str =
                 for c_idx, value in enumerate(row, 1):
                     cell = ws0.cell(row=r_idx, column=c_idx, value=value if pd.notna(value) else "")
                     cell.border = thin_border; cell.alignment = left_align if c_idx > 1 else center
+                ws0.row_dimensions[r_idx].height = 40
+
+            ws0.column_dimensions["A"].width = 12
+            ws0.column_dimensions["B"].width = 55
+            ws0.column_dimensions["C"].width = 15
+            ws0.column_dimensions["D"].width = 22
+            ws0.column_dimensions["E"].width = 15
+            ws0.column_dimensions["F"].width = 55
 
             ws1 = wb.create_sheet("1_Strength_Matrix")
         except Exception:
@@ -739,8 +711,14 @@ def create_excel_report(results: list[dict], model_name: str, output_path: str =
     else:
         ws1 = wb.active; ws1.title = "1_Strength_Matrix"
 
-    # Sheet 1: Strength Matrix
+    # ----- Sheet 1: Strength Matrix -----
     ws1["A1"] = "CO-PO/PSO Correlation Strength Matrix (GAPC V4.0)"
+    ws1["A1"].font = Font(bold=True, size=13, color="1F4E79")
+    ws1.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(ALL_POS) + 1)
+
+    ws1["A2"] = "3 = Substantial (X=68–100%) | 2 = Moderate (X=34–67%) | 1 = Slight (X=10–33%) | – = No correlation"
+    ws1["A2"].font = Font(italic=True, size=9)
+
     ws1.cell(row=4, column=1, value="CO")
     for j, po in enumerate(ALL_POS, 2): ws1.cell(row=4, column=j, value=po)
     _style_header(ws1, 4, 1, len(ALL_POS) + 1)
@@ -760,9 +738,18 @@ def create_excel_report(results: list[dict], model_name: str, output_path: str =
             else: cell.value = "–"; cell.fill = no_fill
             cell.alignment = center; cell.border = thin_border; cell.font = Font(bold=True)
 
-    # Sheet 2: Calculation
+    ws1.column_dimensions["A"].width = 10
+    for col in range(2, len(ALL_POS) + 2):
+        ws1.column_dimensions[get_column_letter(col)].width = 8
+
+    # ----- Sheet 2: Strength Calculation -----
     ws_calc = wb.create_sheet("2_Strength_Calculation")
     ws_calc["A1"] = "CO-PO/PSO Mapping Strength Calculation (GAPC V4.0)"
+    ws_calc["A1"].font = Font(bold=True, size=13, color="1F4E79")
+    ws_calc.merge_cells("A1:H1")
+
+    ws_calc["A4"] = "A. Per-CO Strength Calculation"
+    ws_calc["A4"].font = Font(bold=True, size=11, color="1F4E79")
 
     co_headers = ["CO", "Outcomes Mapped", "Count (3)", "Count (2)", "Count (1)", "Sum of Strengths", "Average Strength", "Status"]
     for col, h in enumerate(co_headers, 1): ws_calc.cell(row=5, column=col, value=h)
@@ -783,6 +770,7 @@ def create_excel_report(results: list[dict], model_name: str, output_path: str =
         for c in range(1, 9): ws_calc.cell(row=r, column=c).border = thin_border
 
     po_start = 6 + len(stats["co_stats"]) + 2
+    ws_calc.cell(row=po_start, column=1, value="B. Per-PO/PSO Strength Calculation").font = Font(bold=True, size=11, color="1F4E79")
     po_headers = ["PO / PSO", "COs Mapped", "Count (3)", "Count (2)", "Count (1)", "Sum of Strengths", "Average Strength", "Coverage"]
     header_row = po_start + 1
     for col, h in enumerate(po_headers, 1): ws_calc.cell(row=header_row, column=col, value=h)
@@ -803,8 +791,38 @@ def create_excel_report(results: list[dict], model_name: str, output_path: str =
         cov_cell.alignment = center
         for c in range(1, 9): ws_calc.cell(row=r, column=c).border = thin_border
 
-    # Sheet 3: Justifications
+    overall_start = header_row + 1 + len(ALL_POS) + 2
+    ws_calc.cell(row=overall_start, column=1, value="C. Overall Strength Metrics").font = Font(bold=True, size=11, color="1F4E79")
+    ov = stats["overall"]
+    metrics = [
+        ("Total COs analyzed", ov["total_cos"]),
+        ("COs with errors", ov["errors"]),
+        ("Total CO-PO/PSO mappings", ov["total_mappings"]),
+        ("Sum of all strengths", ov["sum_all_strengths"]),
+        ("Overall average strength", ov["avg_strength"] if ov["avg_strength"] is not None else "–"),
+        ("POs/PSOs covered", f"{ov['pos_covered']} / {len(ALL_POS)}"),
+    ]
+    for i, (label, value) in enumerate(metrics):
+        r = overall_start + 1 + i
+        ws_calc.cell(row=r, column=1, value=label).border = thin_border
+        val_cell = ws_calc.cell(row=r, column=2, value=value)
+        val_cell.alignment = center; val_cell.border = thin_border
+
+    ws_calc.column_dimensions["A"].width = 22
+    ws_calc.column_dimensions["B"].width = 16
+    ws_calc.column_dimensions["C"].width = 12
+    ws_calc.column_dimensions["D"].width = 12
+    ws_calc.column_dimensions["E"].width = 12
+    ws_calc.column_dimensions["F"].width = 16
+    ws_calc.column_dimensions["G"].width = 16
+    ws_calc.column_dimensions["H"].width = 12
+
+    # ----- Sheet 3: Justifications -----
     ws2 = wb.create_sheet("3_Mapping_with_Justification")
+    ws2["A1"] = "Complete CO-PO/PSO Mapping with Justification"
+    ws2["A1"].font = Font(bold=True, size=13, color="1F4E79")
+    ws2.merge_cells("A1:H1")
+
     headers2 = ["CO", "PO / PSO", "Strength", "X (%)", "Yes/Total PIs", "Contributing PIs", "Justification", "Primary WK"]
     for col, h in enumerate(headers2, 1): ws2.cell(row=3, column=col, value=h)
     _style_header(ws2, 3, 1, 8)
@@ -824,7 +842,120 @@ def create_excel_report(results: list[dict], model_name: str, output_path: str =
             ws2.cell(row=row_num, column=7, value=data.get("justification", "")).alignment = left_align
             ws2.cell(row=row_num, column=8, value=primary_wk).alignment = center
             for c in range(1, 9): ws2.cell(row=row_num, column=c).border = thin_border
+            ws2.row_dimensions[row_num].height = 50
             row_num += 1
+
+    ws2.column_dimensions["A"].width = 8
+    ws2.column_dimensions["B"].width = 10
+    ws2.column_dimensions["C"].width = 10
+    ws2.column_dimensions["D"].width = 10
+    ws2.column_dimensions["E"].width = 14
+    ws2.column_dimensions["F"].width = 28
+    ws2.column_dimensions["G"].width = 70
+    ws2.column_dimensions["H"].width = 12
+
+    # ----- Sheet 4: Understanding & Recommendations -----
+    ws3 = wb.create_sheet("4_Understanding_Recommendations")
+    ws3["A1"] = "Deep Understanding of each CO + Recommendations"
+    ws3["A1"].font = Font(bold=True, size=13, color="1F4E79")
+    ws3.merge_cells("A1:D1")
+
+    headers3 = ["CO", "Understanding of CO", "Suggested WKs", "Recommendations"]
+    for col, h in enumerate(headers3, 1): ws3.cell(row=3, column=col, value=h)
+    _style_header(ws3, 3, 1, 4)
+
+    for i, res in enumerate(results):
+        r = 4 + i
+        ws3.cell(row=r, column=1, value=res.get("co_id", "")).alignment = center
+        ws3.cell(row=r, column=2, value=res.get("understanding", "")).alignment = left_align
+        suggested = res.get("suggested_wks") or []
+        ws3.cell(row=r, column=3, value=", ".join(str(w) for w in suggested)).alignment = center
+        ws3.cell(row=r, column=4, value=res.get("recommendations", "")).alignment = left_align
+        for c in range(1, 5): ws3.cell(row=r, column=c).border = thin_border
+        ws3.row_dimensions[r].height = 70
+
+    ws3.column_dimensions["A"].width = 8
+    ws3.column_dimensions["B"].width = 65
+    ws3.column_dimensions["C"].width = 25
+    ws3.column_dimensions["D"].width = 50
+
+    # ----- Sheet 5: PI Yes/No Detail -----
+    ws_pi = wb.create_sheet("5_PI_YesNo_Detail")
+    ws_pi["A1"] = "PO/PSO–Competency–PI–CO Mapping Status (GAPC V4.0 Step 6)"
+    ws_pi["A1"].font = Font(bold=True, size=13, color="1F4E79")
+    ws_pi.merge_cells("A1:G1")
+
+    co_ids = [res.get("co_id", f"CO{i+1}") for i, res in enumerate(results)]
+    yes_lookup = {res.get("co_id", ""): {po: set(data.get("contributing_pis") or []) for po, data in (res.get("mapped_pos") or {}).items()} for res in results}
+
+    row = 4
+    for po in ALL_POS:
+        info = catalog.get(po)
+        if not info: continue
+        ws_pi.cell(row=row, column=1, value=f"{po}: {info['title']}").font = Font(bold=True, size=11, color="1F4E79")
+        ws_pi.merge_cells(start_row=row, start_column=1, end_row=row, end_column=3 + len(co_ids))
+        row += 1
+
+        headers = ["Competency", "PI ID", "Performance Indicator"] + co_ids
+        for col, h in enumerate(headers, 1): ws_pi.cell(row=row, column=col, value=h)
+        _style_header(ws_pi, row, 1, len(headers))
+        row += 1
+
+        for pid, pdesc in info["pis"].items():
+            parts = pid.split(".")
+            competency = ".".join(parts[:2]) if len(parts) >= 2 else pid
+            ws_pi.cell(row=row, column=1, value=competency).alignment = center
+            ws_pi.cell(row=row, column=2, value=pid).alignment = center
+            ws_pi.cell(row=row, column=3, value=pdesc).alignment = left_align
+            for j, cid in enumerate(co_ids):
+                is_yes = pid in yes_lookup.get(cid, {}).get(po, set())
+                cell = ws_pi.cell(row=row, column=4 + j, value="Yes" if is_yes else "No")
+                cell.alignment = center; cell.fill = s3_fill if is_yes else no_fill
+            for c in range(1, 4 + len(co_ids)): ws_pi.cell(row=row, column=c).border = thin_border
+            row += 1
+
+        ws_pi.cell(row=row, column=1, value="Mapping Strength X (%)").font = Font(bold=True)
+        ws_pi.merge_cells(start_row=row, start_column=1, end_row=row, end_column=3)
+        for j, cid in enumerate(co_ids):
+            yes_c = len(yes_lookup.get(cid, {}).get(po, set()))
+            _, x_pct = gapc_mapping_value(yes_c, len(info["pis"]))
+            cell = ws_pi.cell(row=row, column=4 + j, value=x_pct)
+            cell.alignment = center; cell.font = Font(bold=True); cell.border = thin_border
+        row += 1
+
+        ws_pi.cell(row=row, column=1, value="Mapping Value (1/2/3)").font = Font(bold=True)
+        ws_pi.merge_cells(start_row=row, start_column=1, end_row=row, end_column=3)
+        for j, cid in enumerate(co_ids):
+            yes_c = len(yes_lookup.get(cid, {}).get(po, set()))
+            strength, _ = gapc_mapping_value(yes_c, len(info["pis"]))
+            cell = ws_pi.cell(row=row, column=4 + j, value=strength if strength else "–")
+            cell.alignment = center; cell.font = Font(bold=True); cell.border = thin_border
+            if strength == 3: cell.fill = s3_fill
+            elif strength == 2: cell.fill = s2_fill
+            elif strength == 1: cell.fill = s1_fill
+            else: cell.fill = no_fill
+        row += 2
+
+    ws_pi.column_dimensions["A"].width = 14
+    ws_pi.column_dimensions["B"].width = 10
+    ws_pi.column_dimensions["C"].width = 70
+    for j in range(len(co_ids)): ws_pi.column_dimensions[get_column_letter(4 + j)].width = 8
+
+    # ----- Sheet 6: Summary -----
+    ws4 = wb.create_sheet("6_Summary")
+    ws4["A1"] = "Summary"
+    ws4["A1"].font = Font(bold=True, size=13, color="1F4E79")
+
+    covered = [po for po, st in stats["po_stats"].items() if st["total_mapped"] > 0]
+    ws4["A3"] = "POs/PSOs covered:"; ws4["B3"] = ", ".join(sorted(covered, key=_po_sort_key)) if covered else "None"
+    ws4["A4"] = "Model used:"; ws4["B4"] = model_name
+    ws4["A5"] = "Total COs analyzed:"; ws4["B5"] = ov["total_cos"]
+    ws4["A6"] = "COs with errors:"; ws4["B6"] = ov["errors"]
+    ws4["A7"] = "Total CO-PO/PSO mappings:"; ws4["B7"] = ov["total_mappings"]
+    ws4["A8"] = "Overall average strength:"; ws4["B8"] = ov["avg_strength"] if ov["avg_strength"] is not None else "–"
+
+    ws4.column_dimensions["A"].width = 28
+    ws4.column_dimensions["B"].width = 70
 
     wb.save(output_path)
     print(f"\nExcel report saved → {output_path}")
